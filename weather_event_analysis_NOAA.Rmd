@@ -1,0 +1,207 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Reproducible Research  - Course Project 2
+# NOAA Storm Database - Weather Events in US from 1950 to 2011
+Author: Linh Dang
+Date: 18 Jan 2020
+
+This is my submission for the Coure Project 2 in Reproducible Reserach couse from JHU on Coursera. 
+
+## Synopsis
+In this report, our aim is to investigate the dataset from U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database and try to give anwers to these 2 major questions:
+1. Which types of events are the most harmful with respect to population health?
+2. Which types of events have the greatest economic consequences?
+
+The investigated dataset is a collection of records of weather events from 1950 to 2011, which include their characteristics along with estimated fatalities, injuries, property and crop damage that they had caused. We perform data analysis on this dataset, then extract the top 5 as answers for each question of interest. 
+
+The resulting analysis reveals that the weather event types which are most harmful to population health are `LIGHTNING`,`FLOOD`,`TSTM WIND`,`EXCESSIVE HEAT`, and `TORNADO`. Meanwhile, the ones causing greatest economic damage are `HAIL`, `STORM SURGE`, `TORNADO`, `HURRICANE/TYPHOON`, and `FLOOD`. 
+
+
+## Loading and Processing Data
+
+The dataset we would use is obtained from  U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. A copy of this dataset is accessible from [here](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2).
+
+For more information about the dataset and complete database, reference to this [documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) and [FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf).
+
+This data file is a `.bz2` compressed file. A common practice is unzipping it (with or without using R function). However, in this case, I read the data directly to R using `read.csv()`. The unzipped data file would be a comma-separated value (`.csv`) file. 
+
+
+Assuming that the .bz2 has already in the working directory:
+
+
+```{r read_data}
+data <- read.csv('repdata_data_StormData.csv.bz2')
+```
+
+We load some packages to use later: 
+
+```{r load_libraries, message = FALSE, warning = FALSE}
+library(dplyr) # my favorite package, for data manupulation 
+library(ggplot2) # for plotting
+```
+
+
+After reading data, we obtain a data frame containing 902,297 observations with 37 variables (features). 
+Take a quick look to the loaded data: 
+```{r}
+str(data)
+```
+
+```{r}
+head(data)
+```
+
+The original dataset is fairly tidy. However, considering columns relating to property and crop damage (respectively `PROPDMG` and `CROPDMG`), we see that they are both followed by columns indicating the magtitude of damage (i.e. `PROPDMGEXP` and `CROPDMGEXP`).
+
+For the convenience of comparison, we modify these columns so that the damage is represented as **numeric values**. 
+
+As referred to Section 2.7, page 12 of the documentation, there are 3 characters used to signify the magtitude of damage ("K" for "thousands", "M" for "millions", "B" for "billions"). We would use them as the basis to convert damage values.
+
+**NOTES:** If we dig a little bit deeper to `PROPDMGEXP` and `CROPDMGEXP`, it is clear that these 2 variables do not contain only 3 kinds of values. For example, if we look at `PROPDMGEXP`, it is a factor variable with more than 3 levels.
+
+
+```{r}
+unique(data$PROPDMGEXP)
+```
+
+
+Nonetheless, we lack the information about the magtitudes that the remaining characters signify. Therefore, I choose to treat them as "noise"/NAs. We would ignore them in the process of analysis. 
+
+I take advantage of `case_when()` in `dplyr` package that we have imported. Here we create a new column containing  converted values by multiply the `PROPDMG`/`CROPDMG` with the corresponding magtitudes.
+
+```{r create_val_cols}
+
+#create PROPDMGVAL - property damage value 
+
+data <- data %>% mutate(PROPDMGVAL = case_when(
+  data$PROPDMGEXP == 'K' ~ 1000,
+  data$PROPDMGEXP == 'M' ~ 1000000,
+  data$PROPDMGEXP == 'B' ~ 1000000000,
+  TRUE                   ~ NA_real_
+  
+)*data$PROPDMG)
+
+
+# similarly, create CROPDMGVAL - crop damage value
+
+data <- data %>% mutate(CROPDMGVAL = case_when(
+  data$CROPDMGEXP == 'K' ~ 1000,
+  data$CROPDMGEXP == 'M' ~ 1000000,
+  data$CROPDMGEXP == 'B' ~ 1000000000,
+  TRUE                   ~ NA_real_
+  
+)*data$CROPDMG)
+
+```
+
+
+## Results 
+
+We are interested in which types of events creating greatest damage in particular categories (i.e. most detrimental to population health and most destructive in terms of economic consequences). Thus, I subset the dataset to create a new datas, which includes only the columns we should devote close attention to. 
+
+Let's create a new dataset with only the columns of interest. They are `EVTYPE`, `FATALITIES`, `INJURIES`, along with two newly created `PROPDMGVAL` and `CROPDMGVAL`.
+
+```{r create_new_data}
+
+newdata <- data %>% select(EVTYPE,FATALITIES,INJURIES,PROPDMGVAL,CROPDMGVAL)
+
+head(newdata)
+```
+
+### A. Which types of events are most harmful to human health?
+
+There are numerous types of weather event in the dataset. We hence restrict the definition of "harmful to human health" to the number of "fatalities" and "injuries" that they have caused. 
+
+Let's group our new data by event type, then calculate the total fatalities and injuries in each type. 
+
+```{r group_harmful}
+harmful_group <- newdata %>% group_by(EVTYPE) %>% summarise(fatalities = sum(FATALITIES, na.rm = TRUE),injuries = sum(INJURIES, na.rm = TRUE))
+```
+
+We obtain a new data frame with types of events and their total fatalities and injuries. 
+
+Now we could sort the data to find out which types are the most harmful ones.
+
+The multi-level sorting method I use is as follows: first, sort by the total, then sort by the number of fatalities (since they are more severe). 
+
+We create a new colum for the sum of fatalities and injuries: 
+
+```{r}
+harmful_group <- harmful_group %>% mutate(total = fatalities + injuries)
+```
+
+Sort data based on the mentioned method:
+
+```{r harmful_sorting}
+harmful_group <- harmful_group %>% arrange(desc(total), desc(fatalities))
+```
+
+We could limit the most harmful ones to top 5. Extract them to make the plot:
+
+```{r top_harmful}
+
+most_harmful <- head(harmful_group, n = 5)
+most_harmful
+```
+
+Plot the data obtained:
+
+```{r plot_1, fig.width= 8, fig.height=5, fig.fullwidth = TRUE, fig.cap= "Fig 1: Most Harmful Types"}
+
+g1 <- ggplot(most_harmful, aes(reorder(EVTYPE,total), total, fill = EVTYPE))
+
+g1 + geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 0.9)) + geom_text(aes(label = most_harmful$total), vjust = -0.5, size = 3.5) + ylim(0,100000) + labs(x = 'Event Type', y = 'Sum of Fatalities and Injuries', title = 'Top 5 Most Harmful Event Types to Population Health \n (1950 - 2011)') + theme(axis.text.x = element_text(size = 8.5), plot.title = element_text(hjust = 0.5))
+```
+
+### B. Which types of event have greatest economic consequences?
+
+Similarly, we would select top 5 types of event that cause greatest damage by calculating the sum of property damage and crop damage. 
+
+Create a new data frame by grouping `newdata` by event types then calculate the sum of property and crop damage in each type. 
+
+
+```{r group_damage}
+damage_group <- newdata %>% group_by(EVTYPE) %>% summarise(propdmg = sum(PROPDMGVAL, na.rm = TRUE), cropdmg = sum(CROPDMGVAL,na.rm = TRUE))
+```
+
+Create a new column for total damage:
+
+```{r}
+damage_group <- damage_group %>% mutate(totaldmg = propdmg + cropdmg)
+```
+
+Sort data:
+
+```{r damage_sorting}
+damage_group <- damage_group %>% arrange(desc(totaldmg))
+```
+
+Extract the top 5:
+
+```{r top_damage}
+most_damage <- head(damage_group, n = 5)
+most_damage
+```
+
+As we could observe, the values in `totaldmg` column are very large. Hence, for aesthetic purpose, let's modify these numbers by shifting the unit to billion and add comma separator.
+
+```{r}
+l <- sapply(most_damage$totaldmg, function(x) format(round(x/1000000000,2), big.mark = ",", scientific = FALSE))
+```
+
+Now we can make a plot: 
+
+```{r plot_2, fig.width= 8, fig.height= 5,fig.fullwidth = TRUE, fig.cap= "Fig 2: Types Causing Greatest Damage"}
+
+g2 <- ggplot(most_damage,aes(reorder(EVTYPE,totaldmg),totaldmg, fill = EVTYPE))
+
+g2 + geom_bar(stat = 'identity', width = 0.7, position = position_dodge(width = 0.7))+ geom_text(aes(label = l), vjust = -0.5, size = 3) + scale_y_continuous(labels = scales::unit_format(unit = "B", scale = 1e-9),limits = c(0,200000000000)) + labs(x = "Event Type", y = "Total Damage (billions)", title = "Top 5 Event Types With Greatest Economic Consequences \n (1950 - 2011)") + theme(axis.text.x = element_text(size = 8.5), plot.title = element_text(hjust = 0.5))
+```
